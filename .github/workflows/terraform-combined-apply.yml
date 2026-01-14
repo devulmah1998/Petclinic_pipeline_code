@@ -1,0 +1,128 @@
+name: Terraform Apply - Combined Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infrastructure-combined/**'
+      - '.github/workflows/terraform-combined-apply.yml'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to perform'
+        required: true
+        default: 'apply'
+        type: choice
+        options:
+          - apply
+          - destroy
+
+env:
+  TF_VERSION: 1.6.0
+  WORKING_DIR: infrastructure-combined
+
+jobs:
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform init
+
+      - name: Terraform Plan
+        if: github.event.inputs.action != 'destroy'
+        working-directory: ${{ env.WORKING_DIR }}
+        env:
+          TF_VAR_key_name: ${{ secrets.TF_VAR_KEY_NAME }}
+          TF_VAR_git_repo_url: ${{ secrets.TF_VAR_GIT_REPO_URL }}
+          TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
+          TF_VAR_private_key_path: "/tmp/dummy-key.pem"
+        run: |
+          echo "dummy-key" > /tmp/dummy-key.pem
+          chmod 400 /tmp/dummy-key.pem
+          terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        if: github.event.inputs.action != 'destroy'
+        working-directory: ${{ env.WORKING_DIR }}
+        env:
+          TF_VAR_key_name: ${{ secrets.TF_VAR_KEY_NAME }}
+          TF_VAR_git_repo_url: ${{ secrets.TF_VAR_GIT_REPO_URL }}
+          TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
+          TF_VAR_private_key_path: "/tmp/dummy-key.pem"
+        run: |
+          echo "dummy-key" > /tmp/dummy-key.pem
+          chmod 400 /tmp/dummy-key.pem
+          terraform apply -auto-approve tfplan
+
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'destroy'
+        working-directory: ${{ env.WORKING_DIR }}
+        env:
+          TF_VAR_key_name: ${{ secrets.TF_VAR_KEY_NAME }}
+          TF_VAR_git_repo_url: ${{ secrets.TF_VAR_GIT_REPO_URL }}
+          TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
+          TF_VAR_private_key_path: "/tmp/dummy-key.pem"
+        run: |
+          echo "dummy-key" > /tmp/dummy-key.pem
+          chmod 400 /tmp/dummy-key.pem
+          terraform destroy -auto-approve
+
+      - name: Terraform Output
+        if: github.event.inputs.action != 'destroy'
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          echo "=== Deployment Summary ==="
+          terraform output summary
+          echo ""
+          echo "=== Connection Info ==="
+          terraform output -json connection_info
+
+      - name: Save Outputs
+        if: github.event.inputs.action != 'destroy'
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform output -json > outputs.json
+          
+      - name: Upload Outputs
+        if: github.event.inputs.action != 'destroy'
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-outputs
+          path: ${{ env.WORKING_DIR }}/outputs.json
+
+      - name: Create Deployment Summary
+        if: github.event.inputs.action != 'destroy'
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          echo "## 🚀 Infrastructure Deployed Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources Created:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ EC2 Instance (t3.xlarge, 16GB RAM)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ RDS MySQL Database (db.t3.micro)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Security Groups" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ IAM Roles" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Connection Details:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          terraform output summary >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
